@@ -1,11 +1,3 @@
-/**
- * AULA IoT - Embarcatech - Ricardo Prates - 004 - Webserver Raspberry Pi Pico w - wlan
- *
- * Material de suporte
- * 
- * https://www.raspberrypi.com/documentation/pico-sdk/networking.html#group_pico_cyw43_arch_1ga33cca1c95fc0d7512e7fef4a59fd7475 
- */
-
 #include <stdio.h>             
 #include <string.h>             
 #include <stdlib.h>
@@ -37,19 +29,11 @@ static char digitado[PASSWORD_SIZE + 1] = {' ', ' ', ' ', '\0'}; // Buffer para 
 static uint8_t cursor = 0; // Cursor da posição atual da digitação
 
 static bool displayUpdate = true; // Flag para atualizar o displaySSD1306 (Já começa ativado para inicialização)
-static bool confirmou = false; // Indica se o usuário terminou de digitar uma senha ou não
-
-// Trecho para modo BOOTSEL com botão B
-#include "pico/bootrom.h"
-#define botaoB 6
-void gpio_irq_handler(uint gpio, uint32_t events)
-{
-  reset_usb_boot(0, 0);
-}
+static bool confirmou = false; // Indica se o programa está em processo de validação de uma senha
 
 // Headers de função
 void inicializarLed(void); // Inicializar os Pinos GPIO para acionamento dos LEDs da BitDogLab
-void limparBuffer(int size, char array[size]); // Limpa o que foi armazenado em um array de caracteres
+void limparBuffer(int size, char array[size]); // Limpa um array de caracteres, preenchendo-o com espaços
 int64_t led_result_callback(alarm_id_t id, void* user_data); // Callback para transitar do modo de validação ao de digitação
 static err_t tcp_server_accept(void *arg, struct tcp_pcb *newpcb, err_t err); // Função de callback ao aceitar conexões TCP
 static err_t tcp_server_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err); // Função de callback para processar requisições HTTP
@@ -57,21 +41,16 @@ void user_request(char **request); // Tratamento do request do usuário
 
 // Função principal
 int main()
-{
-    // Para ser utilizado o modo BOOTSEL com botão B
-    gpio_init(botaoB);
-    gpio_set_dir(botaoB, GPIO_IN);
-    gpio_pull_up(botaoB);
-    gpio_set_irq_enabled_with_callback(botaoB, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
-    // Aqui termina o trecho para modo BOOTSEL com botão B
-
+{   
+    // Inicializa o STDIO
     stdio_init_all();
 
     // Inicializa o display
     ssd1306_t ssd;
     ssd1306_i2c_init(&ssd);
 
-    ssd1306_draw_string(&ssd, "Iniciando...", 48, 20); 
+    // Mostrar no display que o programa está inicializando
+    ssd1306_draw_string(&ssd, "Iniciando", 48, 20); 
     ssd1306_send_data(&ssd);
 
     // Inicializar os Pinos GPIO para acionamento dos LEDs da BitDogLab
@@ -131,31 +110,40 @@ int main()
         // Atualiza o display caso necessário
         if (displayUpdate)
         {   
+            // Limpa o display
             ssd1306_fill(&ssd, false);
 
+            // Desenha o menu
             ssd1306_draw_string(&ssd, "Senha: ", 40, 12);
             ssd1306_draw_string(&ssd, senha, 48, 20);
             ssd1306_draw_string(&ssd, "Digitado: ", 8, 36);
             ssd1306_draw_string(&ssd, digitado, 8, 44);
 
+            // Envia as novas informações
             ssd1306_send_data(&ssd);
 
+            // Atualiza a flag após a conclusão
             displayUpdate = false;
         }
 
+        // Se o usuário confirmou a senha digitada e ela possui o tamanho correto
         if (cursor >= PASSWORD_SIZE && confirmou)
         {
             cursor = 0;
 
+            // Verifica se a senha digitada foi correta
             if (strcmp(senha, digitado) == 0)
-            {
+            {  
+                // Indicar acerto pelo LED verde
                 gpio_put(led_green_pin, 1);
             }
             else
-            {
+            {  
+                // Indicar erro pelo LED vermelho
                 gpio_put(led_red_pin, 1);
             }
 
+            // Alarme para desligar os LEDs após 1,5 segundos
             add_alarm_in_ms(1500, led_result_callback, NULL, false);
         }
 
@@ -181,10 +169,12 @@ void inicializarLed(void)
     gpio_put(led_red_pin, false);
 }
 
+// Limpa um array de caracteres, preenchendo-o com espaços
 void limparBuffer(int size, char array[size])
 {
     for (int i = 0; i < size; i++)
     {   
+        // Associar a posição atual com espaço se não for um caractere nulo
         if (!(i == size - 1))
         {
             array[i] = ' ';
@@ -192,6 +182,7 @@ void limparBuffer(int size, char array[size])
     }
 }
 
+// Callback que desliga os LEDs e finaliza o processo de validação de senha
 int64_t led_result_callback(alarm_id_t id, void* user_data)
 {
     if (gpio_get(led_green_pin))
@@ -219,9 +210,10 @@ static err_t tcp_server_accept(void *arg, struct tcp_pcb *newpcb, err_t err)
 void user_request(char **request)
 {   
     // Requests de digitos
+    // Associam o digito escolhido à posição atual do cursor e "pedem" a atualização do display
     if (cursor < PASSWORD_SIZE)
     {
-        if (strstr(*request, "GET /digit_A") != NULL )
+        if (strstr(*request, "GET /digit_A") != NULL)
         {
             digitado[cursor] = 'A';
             cursor++;
@@ -262,10 +254,12 @@ void user_request(char **request)
     // Requests de operações
     if (strstr(*request, "GET /confirm") != NULL && cursor >= PASSWORD_SIZE)
     {   
+        // Atualiza o estado do programa para a validação de senha
         confirmou = true;
     }
     else if (strstr(*request, "GET /erase") != NULL)
-    {
+    {  
+        // Apaga todo o conteúdo do buffer digitado e pede atualização do display
         limparBuffer(PASSWORD_SIZE + 1, digitado);
         cursor = 0;
         displayUpdate = true;
